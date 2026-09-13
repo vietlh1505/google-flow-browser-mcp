@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { spawn } from 'child_process';
 import { logger } from '../utils/logger.js';
 import { get } from '../utils/config.js';
@@ -45,8 +46,30 @@ export async function connectToBrowser(options = {}) {
   }
 }
 
+function getDefaultChromePath() {
+  if (process.platform === 'win32') {
+    const paths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ];
+    for (const p of paths) {
+      if (fs.existsSync(p)) return p;
+    }
+    return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  }
+  return '/opt/google/chrome/chrome';
+}
+
+function getDefaultUserDataDir() {
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA || 'C:\\Users\\pc\\AppData\\Local', 'Google', 'Chrome', 'User Data');
+  }
+  return path.resolve(process.env.HOME || '', '.config/google-chrome');
+}
+
 async function launchNewBrowser(cdpPort, options = {}) {
-  const chromePath = options.chromePath || '/opt/google/chrome/chrome';
+  const chromePath = options.chromePath || get('chromePath', getDefaultChromePath());
   const profileDir = options.profileDir || path.resolve(import.meta.dirname, '../../chrome-profile-kiara');
 
   if (!fs.existsSync(chromePath)) {
@@ -96,14 +119,17 @@ async function launchNewBrowser(cdpPort, options = {}) {
 
 /**
  * Launch Chrome DIRECTLY (not via Playwright) to avoid automation detection
- * (navigator.webdriver=false). Creates temp user-data-dir with Profile 3 cookies,
+ * (navigator.webdriver=false). Creates temp user-data-dir with configured profile cookies,
  * launches Chrome via shell, then connects Playwright via CDP.
  */
 export async function launchChromeDirect(options = {}) {
-  const chromePath = options.chromePath || '/opt/google/chrome/chrome';
+  const chromePath = options.chromePath || get('chromePath', getDefaultChromePath());
   const cdpPort = options.cdpPort || get('cdpPort', 9222);
   const headless = options.headless ?? get('headless', false);
-  const profileSource = options.profileSource || path.resolve(process.env.HOME, '.config/google-chrome/Profile 3');
+
+  const chromeUserDataDir = options.chromeUserDataDir || get('chromeUserDataDir', getDefaultUserDataDir());
+  const chromeProfile = options.chromeProfile || get('chromeProfile', 'Profile 9');
+  const profileSource = options.profileSource || path.resolve(chromeUserDataDir, chromeProfile);
 
   if (isConnected && page) {
     logger.info('Already connected, reusing browser');
@@ -114,12 +140,12 @@ export async function launchChromeDirect(options = {}) {
     throw new FlowError(ErrorCodes.PLAYWRIGHT_ERROR, `Chrome not found at ${chromePath}`);
   }
 
-  const tempDir = `/tmp/chrome-kiara-cdp-${Date.now()}`;
+  const tempDir = path.join(os.tmpdir(), `chrome-kiara-cdp-${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  const localStateSrc = path.resolve(path.dirname(profileSource), '../Local State');
+  const localStateSrc = path.resolve(chromeUserDataDir, 'Local State');
   if (fs.existsSync(profileSource)) {
-    fs.cpSync(profileSource, path.join(tempDir, 'Profile 3'), { recursive: true });
+    fs.cpSync(profileSource, path.join(tempDir, chromeProfile), { recursive: true });
   }
   if (fs.existsSync(localStateSrc)) {
     fs.cpSync(localStateSrc, path.join(tempDir, 'Local State'));
@@ -138,7 +164,7 @@ export async function launchChromeDirect(options = {}) {
   const args = [
     `--remote-debugging-port=${cdpPort}`,
     `--user-data-dir=${tempDir}`,
-    '--profile-directory=Profile 3',
+    `--profile-directory=${chromeProfile}`,
     '--no-first-run', '--no-default-browser-check',
     '--disable-blink-features=AutomationControlled',
     '--window-size=1920,1080',

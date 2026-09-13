@@ -11,7 +11,7 @@ const configPath = path.join(FLOW_HOME, 'config', 'flow.config.json');
 let config;
 
 try {
-  const raw = fs.readFileSync(configPath, 'utf-8');
+  const raw = fs.readFileSync(configPath, 'utf-8').replace(/^\uFEFF/, '');
   config = JSON.parse(raw);
 } catch (err) {
   console.error(`[CONFIG] Failed to load config from ${configPath}: ${err.message}`);

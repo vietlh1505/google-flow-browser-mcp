@@ -6,9 +6,31 @@ import { get } from '../utils/config.js';
 import { FlowError, ErrorCodes } from '../utils/errors.js';
 import { launchChromeDirect, setPage, setContext, setConnected, setBrowser, isBrowserConnected } from './connect.js';
 
-const CHROME_PATH = '/opt/google/chrome/chrome';
+function getDefaultChromePath() {
+  if (process.platform === 'win32') {
+    const paths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ];
+    for (const p of paths) {
+      if (fs.existsSync(p)) return p;
+    }
+    return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  }
+  return '/opt/google/chrome/chrome';
+}
+
+function getDefaultUserDataDir() {
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA || 'C:\\Users\\pc\\AppData\\Local', 'Google', 'Chrome', 'User Data');
+  }
+  return path.resolve(process.env.HOME || '', '.config/google-chrome');
+}
+
+const CHROME_PATH = get('chromePath', getDefaultChromePath());
 const CDP_PORT = get('cdpPort', 9222);
-const FLOW_URL = get('flowUrl', 'https://labs.google/fx/fr/tools/flow');
+const FLOW_URL = get('flowUrl', 'https://labs.google/fx/tools/flow');
 
 export async function launchKiaraProfile(headless = false) {
   if (isBrowserConnected()) {
@@ -16,11 +38,13 @@ export async function launchKiaraProfile(headless = false) {
     return { success: true, message: 'Already connected' };
   }
 
-  const profileSource = path.resolve(process.env.HOME, '.config/google-chrome/Profile 3');
+  const chromeUserDataDir = get('chromeUserDataDir', getDefaultUserDataDir());
+  const chromeProfile = get('chromeProfile', 'Profile 9');
+  const profileSource = path.resolve(chromeUserDataDir, chromeProfile);
 
   if (!fs.existsSync(profileSource)) {
     throw new FlowError(ErrorCodes.CONFIG_ERROR,
-      `Profile 3 not found at ${profileSource}. Make sure Chrome Profile 3 exists and is configured with your Google account.`);
+      `Profile not found at ${profileSource}. Make sure Chrome ${chromeProfile} exists and is configured with your Google account.`);
   }
 
   logger.info('Launching Chrome via direct+CDP method (anti-detection)', { profileSource });
